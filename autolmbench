@@ -1,0 +1,188 @@
+#!/bin/bash
+
+##############################################################################
+#  autolmbench - This utility performs LMBench benchmarking.
+#
+#
+#  Usage: autolmbench [OPTIONS]...
+#
+#  Option          GNU long option         Meaning
+#   -h             --help                  Show this message.
+#   -t             --threads               Override number of threads.
+#   -i             --iterations            Override number of iterations.
+#   -p             --prerequisites         Install prerequisites.
+#
+##############################################################################
+#
+#  Last Updated:
+#     12/15/2016
+#
+#  Authors/Contributors:
+#     Ryan Spoone (ryanspoone@gmail.com)
+#
+##############################################################################
+
+############################################################
+# Make sure we are working in the this script's source
+# directory
+############################################################
+AUTO_LM_DIR=$(cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd)
+cd "$AUTO_LM_DIR" || exit
+export AUTO_LM_DIR
+
+OVERRIDE_THREADS=false
+THREADS=0
+OVERRIDE_ITERATIONS=false
+ITERATIONS=2
+PREREQUISITES=false
+
+############################################################
+# Argument parsing
+############################################################
+if [[ "$#" -gt 0 ]]; then
+  while [ "$1" ]; do
+    ARG="$1"
+    if [[ "$ARG" == "-t" || "$ARG" == "--threads" ]]; then
+      OVERRIDE_THREADS=true
+      THREADS="$2"
+      shift
+      shift
+    elif [[ "$ARG" == "-i" || "$ARG" == "--iterations" ]]; then
+      OVERRIDE_ITERATIONS=true
+      ITERATIONS="$2"
+      shift
+      shift
+    elif [[ "$ARG" == "-p" || "$ARG" == "--prerequisites" ]]; then
+      PREREQUISITES=true
+      shift
+    elif [[ "$ARG" == "-h" || "$ARG" == "--help" ]]; then
+      echo "Usage: autolmbench [OPTIONS]..."
+      echo
+      echo "Option          GNU long option         Meaning"
+      echo
+      echo " -h             --help                  Show this message."
+      echo " -t             --threads               Override number of threads."
+      echo " -i             --iterations            Override number of iterations."
+      echo " -p             --prerequisites         Install prerequisites."
+      echo
+      exit 0
+    else
+      echo "autolmbench: invalid operand ‘$ARG’"
+      echo "Try 'autolmbench --help' for more information."
+      echo
+      echo "Usage: autolmbench [OPTIONS]..."
+      echo
+      echo "Option          GNU long option         Meaning"
+      echo
+      echo " -h             --help                  Show this message."
+      echo " -t             --threads               Override number of threads."
+      echo " -i             --iterations            Override number of iterations."
+      echo " -p             --prerequisites         Install prerequisites."
+      echo
+      exit 1
+    fi
+  done
+fi
+
+
+# shellcheck disable=SC1091,SC1090
+source "$AUTO_LM_DIR/lib/system_info.sh"
+source "$AUTO_LM_DIR/lib/prerequisites.sh"
+
+
+# Install prerequisites
+if [[ $PREREQUISITES == true ]]; then
+  installPrerequisites
+fi
+# Get and set all required system information
+getSystemInfo
+
+# if there is not a lmbench directory
+if [ ! -d "$AUTO_LM_DIR/lmbench3" ]; then
+  # if there is not a lmbench archive, wget it
+  if [ ! -f "$AUTO_LM_DIR/lmbench3.tar.gz" ]; then
+    cd "$AUTO_LM_DIR" || exit
+    wget 'http://www.bitmover.com/lmbench/lmbench3.tar.gz'
+  fi
+
+  tar -zxvf lmbench3.tar.gz
+
+  cd "$AUTO_LM_DIR/lmbench3" || exit
+
+  make -j6
+fi
+
+
+# Display system information and warnings
+echo
+echo '*************************** System Information **************************'
+echo
+echo "CPU:                         $CPU"
+echo "Architecture:                $(arch) $ARCH bit"
+echo "OS:                          $OS $VER"
+echo
+
+if [[ $OVERRIDE_THREADS == true ]]; then
+  echo "Overriden Threads:           $THREADS"
+else
+  echo "Physical Processors:         $PHYSICAL_PROCESSORS"
+  echo "Total Logical Processors:    $LOGICAL_CORES"
+  echo "Cores Per Processor:         $CORES"
+  echo "System Core Count:           $TOTAL_CORES"
+fi
+echo
+echo "Total RAM:                   $RAM_GB GB"
+if [ ! -z "$TOTAL_CACHE" ]; then
+  echo "Total CPU system cache:      $TOTAL_CACHE bytes"
+fi
+
+
+# make sure we are in the right directory
+if [ -f "$AUTO_LM_DIR/lmbench3/bin/lat_mem_rd" ]; then
+  cd "$AUTO_LM_DIR/lmbench3/bin" || exit
+elif [ -f "$AUTO_LM_DIR/lmbench3/bin/$(arch)/lat_mem_rd" ]; then
+  cd "$AUTO_LM_DIR/lmbench3/bin/$(arch)" || exit
+else
+  echo
+  echo "Cannot find the bin directory for LMBench. Exiting now."
+  echo
+  exit 1
+fi
+
+# handle overrides
+if [[ "$OVERRIDE_THREADS" == true ]]; then
+  LOGICAL_THREADS="$THREADS"
+fi
+
+echo
+echo "Running..."
+echo
+
+
+# latency
+echo
+echo "Latency for memory read operations:"
+echo
+echo "256M Depth and 512 Stride over core 0x1:"
+echo
+taskset -c 0x1 ./lat_mem_rd -P 1 -N "$ITERATIONS" 256M 512
+echo
+echo "512M Depth and 1024 Stride over core 0x1:"
+echo
+taskset -c 0x1 ./lat_mem_rd -P 1 -N "$ITERATIONS" 512M 1024
+
+# bandwidth for read operation
+echo
+echo "Bandwidth:"
+echo
+# 32M span
+echo
+echo "32M size with read traffic type:"
+echo
+./bw_mem -P "$LOGICAL_THREADS" -N "$ITERATIONS" 32M rd
+
+# 8M span
+echo
+echo "8M size with read traffic type:"
+echo
+./bw_mem -P "$LOGICAL_THREADS" -N "$ITERATIONS" 8M rd
