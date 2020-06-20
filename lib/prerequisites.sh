@@ -1,7 +1,7 @@
 #!/bin/bash
 
 ##############################################################################
-#  system_info.sh - This script handles the installing prerequisites.
+#  system_info.sh - This script handles installing prerequisites.
 ##############################################################################
 
 function installPrerequisites {
